@@ -1,14 +1,42 @@
 # auto_typewriter.py
+import ctypes
 import random
 import re
 import threading
 import time
 import tkinter as tk
+from ctypes import wintypes
 from tkinter import ttk, messagebox
 from typing import Callable
 
 import pyautogui
 import pyperclip
+
+# Windows IME 常量
+IME_CMODE_ALPHANUMERIC = 0x0000  # 英文模式
+IME_CMODE_NATIVE = 0x0001        # 中文模式
+
+# Windows API 函数
+imm32 = ctypes.windll.imm32
+user32 = ctypes.windll.user32
+
+
+def get_ime_mode() -> int:
+    """获取当前输入法模式，返回IME_CMODE常量"""
+    hwnd = user32.GetForegroundWindow()
+    himc = imm32.ImmGetContext(hwnd)
+    if himc:
+        mode = wintypes.DWORD()
+        imm32.ImmGetConversionStatus(himc, ctypes.byref(mode), None)
+        imm32.ImmReleaseContext(hwnd, himc)
+        return mode.value
+    return IME_CMODE_ALPHANUMERIC
+
+
+def is_ime_english() -> bool:
+    """检查输入法是否为英文模式"""
+    mode = get_ime_mode()
+    return (mode & IME_CMODE_NATIVE) == 0
 
 
 class SpeedController:
@@ -51,6 +79,19 @@ class TypewriterEngine:
         self._position: int = 0
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._target_window: int = 0
+        self._check_interval: float = 0.3
+
+    def _check_window_changed(self) -> bool:
+        """检查活动窗口是否变化"""
+        if self._target_window == 0:
+            return False
+        current_window = user32.GetForegroundWindow()
+        return current_window != self._target_window
+
+    def _check_ime_mode(self) -> bool:
+        """检查输入法是否为英文，返回True表示正常"""
+        return is_ime_english()
 
     def _type_char(self, char: str) -> None:
         """输入单个字符，处理中英文"""
@@ -67,7 +108,9 @@ class TypewriterEngine:
         text: str,
         speed_controller: SpeedController,
         on_progress: Callable[[int, int], None] | None = None,
-        on_complete: Callable[[], None] | None = None
+        on_complete: Callable[[], None] | None = None,
+        on_window_change: Callable[[], None] | None = None,
+        on_ime_change: Callable[[], None] | None = None
     ) -> None:
         """开始打字（启动后台线程）"""
         with self._lock:
@@ -76,8 +119,11 @@ class TypewriterEngine:
             self._pause_event.set()  # Not paused by default
             self._stop_event.clear()
             self._position = 0
+            self._target_window = user32.GetForegroundWindow()
 
         def typing_loop() -> None:
+            last_check_time = time.time()
+
             for i, char in enumerate(text):
                 if self._stop_event.is_set():
                     break
@@ -88,6 +134,22 @@ class TypewriterEngine:
 
                 if self._stop_event.is_set():
                     break
+
+                # 定期检查窗口和输入法
+                if time.time() - last_check_time > self._check_interval:
+                    last_check_time = time.time()
+
+                    # 检查窗口变化
+                    if self._check_window_changed():
+                        if on_window_change:
+                            on_window_change()
+                        break
+
+                    # 检查输入法
+                    if not self._check_ime_mode():
+                        if on_ime_change:
+                            on_ime_change()
+                        break
 
                 self._type_char(char)
                 self._position = i + 1
@@ -237,6 +299,11 @@ class GUIApp:
             messagebox.showwarning("提示", "请输入文本")
             return
 
+        # 检查输入法
+        if not is_ime_english():
+            messagebox.showwarning("提示", "请先切换到英文输入法（Shift或Ctrl+Space）")
+            return
+
         # 验证速度输入
         try:
             mode = self.speed_mode.get()
@@ -288,7 +355,9 @@ class GUIApp:
             text,
             speed_controller,
             on_progress=self._on_progress,
-            on_complete=self._on_complete
+            on_complete=self._on_complete,
+            on_window_change=self._on_window_change,
+            on_ime_change=self._on_ime_change
         )
 
     def _on_progress(self, position: int, total: int) -> None:
@@ -298,6 +367,25 @@ class GUIApp:
     def _on_complete(self) -> None:
         """完成回调"""
         self.root.after(0, self._reset_state)
+
+    def _on_window_change(self) -> None:
+        """窗口切换回调"""
+        def handle():
+            self.status_var.set("已暂停 - 检测到窗口切换")
+            self._auto_pause()
+        self.root.after(0, handle)
+
+    def _on_ime_change(self) -> None:
+        """输入法切换回调"""
+        def handle():
+            self.status_var.set("已暂停 - 请切换到英文输入法")
+            self._auto_pause()
+        self.root.after(0, handle)
+
+    def _auto_pause(self) -> None:
+        """自动暂停"""
+        self.engine.pause()
+        self.pause_btn.config(text="继续")
 
     def _on_pause(self) -> None:
         """暂停按钮处理"""
