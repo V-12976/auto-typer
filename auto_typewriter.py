@@ -44,10 +44,12 @@ class TypewriterEngine:
     """打字引擎，负责模拟键盘输入"""
 
     def __init__(self) -> None:
-        self._paused: bool = False
-        self._stopped: bool = False
+        self._pause_event = threading.Event()
+        self._pause_event.set()  # Not paused by default
+        self._stop_event = threading.Event()
         self._position: int = 0
         self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
 
     def _type_char(self, char: str) -> None:
         """输入单个字符，处理中英文"""
@@ -67,18 +69,24 @@ class TypewriterEngine:
         on_complete: Callable[[], None] | None = None
     ) -> None:
         """开始打字（启动后台线程）"""
-        self._paused = False
-        self._stopped = False
-        self._position = 0
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                raise RuntimeError("Typing already in progress")
+            self._pause_event.set()  # Not paused by default
+            self._stop_event.clear()
+            self._position = 0
 
         def typing_loop() -> None:
             for i, char in enumerate(text):
-                if self._stopped:
+                if self._stop_event.is_set():
                     break
-                while self._paused:
-                    time.sleep(0.1)
-                    if self._stopped:
+                # Wait while paused, with periodic stop check
+                while not self._pause_event.wait(timeout=0.1):
+                    if self._stop_event.is_set():
                         break
+
+                if self._stop_event.is_set():
+                    break
 
                 self._type_char(char)
                 self._position = i + 1
@@ -86,24 +94,25 @@ class TypewriterEngine:
                     on_progress(self._position, len(text))
                 time.sleep(speed_controller.get_interval())
 
-            if not self._stopped and on_complete:
+            if not self._stop_event.is_set() and on_complete:
                 on_complete()
 
-        self._thread = threading.Thread(target=typing_loop, daemon=True)
-        self._thread.start()
+        with self._lock:
+            self._thread = threading.Thread(target=typing_loop, daemon=True)
+            self._thread.start()
 
     def pause(self) -> None:
         """暂停打字"""
-        self._paused = True
+        self._pause_event.clear()
 
     def resume(self) -> None:
         """继续打字"""
-        self._paused = False
+        self._pause_event.set()
 
     def stop(self) -> None:
         """停止打字"""
-        self._stopped = True
-        self._paused = False
+        self._stop_event.set()
+        self._pause_event.set()  # Unblock any paused wait
 
     def is_running(self) -> bool:
         """检查是否正在运行"""
@@ -111,4 +120,4 @@ class TypewriterEngine:
 
     def is_paused(self) -> bool:
         """检查是否暂停"""
-        return self._paused
+        return not self._pause_event.is_set()
