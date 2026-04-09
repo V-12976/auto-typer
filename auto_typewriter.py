@@ -12,31 +12,75 @@ from typing import Callable
 import pyautogui
 import pyperclip
 
-# Windows IME 常量
-IME_CMODE_ALPHANUMERIC = 0x0000  # 英文模式
-IME_CMODE_NATIVE = 0x0001        # 中文模式
-
-# Windows API 函数
-imm32 = ctypes.windll.imm32
+# Windows API
 user32 = ctypes.windll.user32
+imm32 = ctypes.windll.imm32
 
-
-def get_ime_mode() -> int:
-    """获取当前输入法模式，返回IME_CMODE常量"""
-    hwnd = user32.GetForegroundWindow()
-    himc = imm32.ImmGetContext(hwnd)
-    if himc:
-        mode = wintypes.DWORD()
-        imm32.ImmGetConversionStatus(himc, ctypes.byref(mode), None)
-        imm32.ImmReleaseContext(hwnd, himc)
-        return mode.value
-    return IME_CMODE_ALPHANUMERIC
+# IME 常量
+IME_CMODE_NATIVE = 0x0001
 
 
 def is_ime_english() -> bool:
-    """检查输入法是否为英文模式"""
-    mode = get_ime_mode()
-    return (mode & IME_CMODE_NATIVE) == 0
+    """检查当前输入法是否为英文模式"""
+    try:
+        hwnd = user32.GetForegroundWindow()
+        himc = imm32.ImmGetContext(hwnd)
+        if himc:
+            mode = wintypes.DWORD()
+            imm32.ImmGetConversionStatus(himc, ctypes.byref(mode), None)
+            imm32.ImmReleaseContext(hwnd, himc)
+            # 如果包含 IME_CMODE_NATIVE 位，说明是中文模式
+            return (mode.value & IME_CMODE_NATIVE) == 0
+    except Exception:
+        pass
+    return True  # 默认认为是英文模式
+
+
+class MouseClickDetector:
+    """鼠标点击检测器，使用Windows钩子"""
+
+    def __init__(self) -> None:
+        self._callback: Callable[[], None] | None = None
+        self._enabled = False
+        self._hook = None
+        self._user32 = ctypes.windll.user32
+
+        # 定义钩子过程
+        self._hook_proc = ctypes.CFUNCTYPE(
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_ulong)
+        )(self._low_level_mouse_hook)
+
+    def _low_level_mouse_hook(self, nCode: int, wParam: int, lParam) -> int:
+        """低级鼠标钩子回调"""
+        if self._enabled and nCode >= 0:
+            # wParam: WM_LBUTTONDOWN = 0x0201, WM_RBUTTONDOWN = 0x0204
+            if wParam in (0x0201, 0x0204):  # 鼠标按下
+                if self._callback:
+                    # 在新线程中调用回调，避免阻塞
+                    threading.Thread(target=self._callback, daemon=True).start()
+        return self._user32.CallNextHookEx(self._hook, nCode, wParam, lParam)
+
+    def start(self, callback: Callable[[], None]) -> None:
+        """开始监听鼠标点击"""
+        self._callback = callback
+        self._enabled = True
+        # WH_MOUSE_LL = 14
+        self._hook = self._user32.SetWindowsHookExA(
+            14,  # WH_MOUSE_LL
+            self._hook_proc,
+            None,
+            0
+        )
+
+    def stop(self) -> None:
+        """停止监听"""
+        self._enabled = False
+        if self._hook:
+            self._user32.UnhookWindowsHookEx(self._hook)
+            self._hook = None
 
 
 class SpeedController:
@@ -79,19 +123,8 @@ class TypewriterEngine:
         self._position: int = 0
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
-        self._target_window: int = 0
-        self._check_interval: float = 0.3
-
-    def _check_window_changed(self) -> bool:
-        """检查活动窗口是否变化"""
-        if self._target_window == 0:
-            return False
-        current_window = user32.GetForegroundWindow()
-        return current_window != self._target_window
-
-    def _check_ime_mode(self) -> bool:
-        """检查输入法是否为英文，返回True表示正常"""
-        return is_ime_english()
+        self._mouse_detector = MouseClickDetector()
+        self._on_mouse_click: Callable[[], None] | None = None
 
     def _type_char(self, char: str) -> None:
         """输入单个字符，处理中英文"""
@@ -109,7 +142,7 @@ class TypewriterEngine:
         speed_controller: SpeedController,
         on_progress: Callable[[int, int], None] | None = None,
         on_complete: Callable[[], None] | None = None,
-        on_window_change: Callable[[], None] | None = None,
+        on_mouse_click: Callable[[], None] | None = None,
         on_ime_change: Callable[[], None] | None = None
     ) -> None:
         """开始打字（启动后台线程）"""
@@ -119,10 +152,14 @@ class TypewriterEngine:
             self._pause_event.set()  # Not paused by default
             self._stop_event.clear()
             self._position = 0
-            self._target_window = user32.GetForegroundWindow()
+
+        # 设置鼠标点击回调
+        self._on_mouse_click = on_mouse_click
+        if on_mouse_click:
+            self._mouse_detector.start(on_mouse_click)
 
         def typing_loop() -> None:
-            last_check_time = time.time()
+            last_ime_check = time.time()
 
             for i, char in enumerate(text):
                 if self._stop_event.is_set():
@@ -135,18 +172,10 @@ class TypewriterEngine:
                 if self._stop_event.is_set():
                     break
 
-                # 定期检查窗口和输入法
-                if time.time() - last_check_time > self._check_interval:
-                    last_check_time = time.time()
-
-                    # 检查窗口变化
-                    if self._check_window_changed():
-                        if on_window_change:
-                            on_window_change()
-                        break
-
-                    # 检查输入法
-                    if not self._check_ime_mode():
+                # 定期检查输入法（每0.5秒）
+                if time.time() - last_ime_check > 0.5:
+                    last_ime_check = time.time()
+                    if not is_ime_english():
                         if on_ime_change:
                             on_ime_change()
                         break
@@ -156,6 +185,9 @@ class TypewriterEngine:
                 if on_progress:
                     on_progress(self._position, len(text))
                 time.sleep(speed_controller.get_interval())
+
+            # 清理鼠标钩子
+            self._mouse_detector.stop()
 
             if not self._stop_event.is_set() and on_complete:
                 on_complete()
@@ -174,6 +206,7 @@ class TypewriterEngine:
 
     def stop(self) -> None:
         """停止打字"""
+        self._mouse_detector.stop()
         self._stop_event.set()
         self._pause_event.set()  # Unblock any paused wait
 
@@ -356,7 +389,7 @@ class GUIApp:
             speed_controller,
             on_progress=self._on_progress,
             on_complete=self._on_complete,
-            on_window_change=self._on_window_change,
+            on_mouse_click=self._on_mouse_click,
             on_ime_change=self._on_ime_change
         )
 
@@ -368,10 +401,10 @@ class GUIApp:
         """完成回调"""
         self.root.after(0, self._reset_state)
 
-    def _on_window_change(self) -> None:
-        """窗口切换回调"""
+    def _on_mouse_click(self) -> None:
+        """鼠标点击回调 - 检测到点击就暂停"""
         def handle():
-            self.status_var.set("已暂停 - 检测到窗口切换")
+            self.status_var.set("已暂停 - 检测到鼠标点击")
             self._auto_pause()
         self.root.after(0, handle)
 
