@@ -315,3 +315,8 @@ class GUIApp:
     def run(self) -> None:
         """运行应用程序"""
         self.root.mainloop()
+
+
+if __name__ == '__main__':
+    app = GUIApp()
+    app.run()
