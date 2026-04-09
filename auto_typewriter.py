@@ -172,19 +172,28 @@ class GUIApp:
             text="固定速度",
             variable=self.speed_mode,
             value="fixed"
-        ).pack(side=tk.LEFT, padx=5)
+        ).grid(row=0, column=0, sticky=tk.W, padx=5)
         ttk.Radiobutton(
             speed_frame,
             text="随机速度",
             variable=self.speed_mode,
             value="random"
-        ).pack(side=tk.LEFT, padx=5)
+        ).grid(row=0, column=1, sticky=tk.W, padx=5)
 
         # Fixed speed input
-        ttk.Label(speed_frame, text="固定速度(字符/秒):").pack(side=tk.LEFT, padx=(20, 5))
-        self.fixed_speed_entry = ttk.Entry(speed_frame, width=8)
-        self.fixed_speed_entry.insert(0, "10")
-        self.fixed_speed_entry.pack(side=tk.LEFT)
+        ttk.Label(speed_frame, text="速度(字/秒):").grid(row=1, column=0, sticky=tk.E, padx=(0, 5))
+        self.fixed_speed_var = tk.StringVar(value='10')
+        self.fixed_speed_entry = ttk.Entry(speed_frame, textvariable=self.fixed_speed_var, width=8)
+        self.fixed_speed_entry.grid(row=1, column=1)
+
+        # Random speed input (min/max)
+        ttk.Label(speed_frame, text="最小:").grid(row=2, column=0, sticky=tk.E, padx=(0, 5))
+        self.min_speed_var = tk.StringVar(value='5')
+        ttk.Entry(speed_frame, textvariable=self.min_speed_var, width=8).grid(row=2, column=1)
+
+        ttk.Label(speed_frame, text="最大:").grid(row=2, column=2, sticky=tk.E, padx=(5, 5))
+        self.max_speed_var = tk.StringVar(value='15')
+        ttk.Entry(speed_frame, textvariable=self.max_speed_var, width=8).grid(row=2, column=3)
 
         # Control buttons
         button_frame = ttk.Frame(main_frame)
@@ -222,6 +231,23 @@ class GUIApp:
     def _on_clear(self) -> None:
         """清空按钮处理（占位方法，Task 5实现）"""
         pass
+
+    def _update_speed_controller(self) -> SpeedController:
+        """根据当前设置创建速度控制器"""
+        mode = self.speed_mode.get()
+        try:
+            fixed_speed = float(self.fixed_speed_var.get())
+            min_speed = float(self.min_speed_var.get())
+            max_speed = float(self.max_speed_var.get())
+        except ValueError:
+            raise ValueError("Speed values must be valid numbers")
+
+        return SpeedController(
+            mode=mode,
+            fixed_speed=fixed_speed,
+            min_speed=min_speed,
+            max_speed=max_speed
+        )
 
     def run(self) -> None:
         """运行应用程序"""
