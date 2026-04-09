@@ -129,8 +129,8 @@ class GUIApp:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("Auto Typewriter v1.0")
-        self.root.geometry("500x450")
-        self.root.minsize(400, 350)
+        self.root.geometry("600x550")
+        self.root.minsize(500, 450)
         self._center_window()
 
         # 初始化引擎
@@ -151,6 +151,11 @@ class GUIApp:
 
     def _create_widgets(self) -> None:
         """创建所有界面组件"""
+        # Status bar at bottom (pack first so it stays at bottom)
+        self.status_var = tk.StringVar(value="就绪")
+        status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.pack(fill=tk.X, side=tk.BOTTOM)
+
         # Main frame with padding
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
@@ -214,11 +219,6 @@ class GUIApp:
 
         self.clear_btn = ttk.Button(button_frame, text="清空", command=self._on_clear)
         self.clear_btn.pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
-
-        # Status bar
-        self.status_var = tk.StringVar(value="就绪")
-        status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.pack(fill=tk.X, side=tk.BOTTOM)
 
     def _on_start(self) -> None:
         """开始按钮处理"""
