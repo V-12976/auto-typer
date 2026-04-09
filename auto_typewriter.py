@@ -421,6 +421,25 @@ class GUIApp:
         # 获取当前活动窗口作为目标窗口
         target_hwnd = user32.GetForegroundWindow()
 
+        # 检测目标窗口的输入法状态
+        # 获取目标窗口的输入法上下文
+        himc = imm32.ImmGetContext(target_hwnd)
+        if himc:
+            mode = wintypes.DWORD()
+            imm32.ImmGetConversionStatus(himc, ctypes.byref(mode), None)
+            imm32.ImmReleaseContext(target_hwnd, himc)
+            is_english = (mode.value & IME_CMODE_NATIVE) == 0
+        else:
+            is_english = True  # 无法获取时默认允许
+
+        if not is_english:
+            messagebox.showwarning("提示", "目标窗口的输入法不是英文模式，请切换到英文输入法后重新开始")
+            self.status_var.set("就绪")
+            return
+
+        # 强制锁定输入法为英文
+        force_ime_english()
+
         self.status_var.set("状态: 打字中...")
         self.start_btn.config(state=tk.DISABLED)
         self.pause_btn.config(state=tk.NORMAL)
