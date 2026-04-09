@@ -121,3 +121,108 @@ class TypewriterEngine:
     def is_paused(self) -> bool:
         """检查是否暂停"""
         return not self._pause_event.is_set()
+
+
+class GUIApp:
+    """GUI应用程序，提供用户界面"""
+
+    def __init__(self) -> None:
+        self.root = tk.Tk()
+        self.root.title("Auto Typewriter v1.0")
+        self.root.geometry("500x400")
+        self._center_window()
+
+        self._create_widgets()
+
+    def _center_window(self) -> None:
+        """将窗口居中显示"""
+        self.root.update_idletasks()
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        x = (screen_width - width) // 2
+        y = (screen_height - height) // 2
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _create_widgets(self) -> None:
+        """创建所有界面组件"""
+        # Main frame with padding
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Text input area with scrollbar
+        text_frame = ttk.LabelFrame(main_frame, text="输入文本", padding="5")
+        text_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.text_input = tk.Text(text_frame, wrap=tk.WORD)
+        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.text_input.yview)
+        self.text_input.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.text_input.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Speed panel
+        speed_frame = ttk.LabelFrame(main_frame, text="速度设置", padding="5")
+        speed_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.speed_mode = tk.StringVar(value="fixed")
+        ttk.Radiobutton(
+            speed_frame,
+            text="固定速度",
+            variable=self.speed_mode,
+            value="fixed"
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(
+            speed_frame,
+            text="随机速度",
+            variable=self.speed_mode,
+            value="random"
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Fixed speed input
+        ttk.Label(speed_frame, text="固定速度(字符/秒):").pack(side=tk.LEFT, padx=(20, 5))
+        self.fixed_speed_entry = ttk.Entry(speed_frame, width=8)
+        self.fixed_speed_entry.insert(0, "10")
+        self.fixed_speed_entry.pack(side=tk.LEFT)
+
+        # Control buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.start_btn = ttk.Button(button_frame, text="开始", command=self._on_start)
+        self.start_btn.pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
+
+        self.pause_btn = ttk.Button(button_frame, text="暂停", command=self._on_pause)
+        self.pause_btn.pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
+
+        self.stop_btn = ttk.Button(button_frame, text="停止", command=self._on_stop)
+        self.stop_btn.pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
+
+        self.clear_btn = ttk.Button(button_frame, text="清空", command=self._on_clear)
+        self.clear_btn.pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
+
+        # Status bar
+        self.status_var = tk.StringVar(value="就绪")
+        status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.pack(fill=tk.X, side=tk.BOTTOM)
+
+    def _on_start(self) -> None:
+        """开始按钮处理（占位方法，Task 5实现）"""
+        pass
+
+    def _on_pause(self) -> None:
+        """暂停按钮处理（占位方法，Task 5实现）"""
+        pass
+
+    def _on_stop(self) -> None:
+        """停止按钮处理（占位方法，Task 5实现）"""
+        pass
+
+    def _on_clear(self) -> None:
+        """清空按钮处理（占位方法，Task 5实现）"""
+        pass
+
+    def run(self) -> None:
+        """运行应用程序"""
+        self.root.mainloop()
