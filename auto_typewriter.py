@@ -2,6 +2,7 @@
 import ctypes
 import random
 import re
+import struct
 import threading
 import time
 import tkinter as tk
@@ -20,8 +21,8 @@ imm32 = ctypes.windll.imm32
 IME_CMODE_NATIVE = 0x0001
 
 
-def is_ime_english() -> bool:
-    """检查当前输入法是否为英文模式"""
+def get_ime_mode() -> int:
+    """获取当前输入法模式"""
     try:
         hwnd = user32.GetForegroundWindow()
         himc = imm32.ImmGetContext(hwnd)
@@ -29,21 +30,69 @@ def is_ime_english() -> bool:
             mode = wintypes.DWORD()
             imm32.ImmGetConversionStatus(himc, ctypes.byref(mode), None)
             imm32.ImmReleaseContext(hwnd, himc)
-            # 如果包含 IME_CMODE_NATIVE 位，说明是中文模式
-            return (mode.value & IME_CMODE_NATIVE) == 0
+            return mode.value
     except Exception:
         pass
-    return True  # 默认认为是英文模式
+    return 0
+
+
+def is_ime_english() -> bool:
+    """检查输入法是否为英文模式"""
+    return (get_ime_mode() & IME_CMODE_NATIVE) == 0
+
+
+def force_ime_english() -> bool:
+    """强制输入法切换为英文模式"""
+    try:
+        hwnd = user32.GetForegroundWindow()
+        himc = imm32.ImmGetContext(hwnd)
+        if himc:
+            # 设置为英文模式
+            imm32.ImmSetConversionStatus(himc, 0, 0)
+            imm32.ImmReleaseContext(hwnd, himc)
+            return True
+    except Exception:
+        pass
+    return False
 
 
 class MouseClickDetector:
-    """鼠标点击检测器，使用Windows钩子"""
+    """鼠标点击检测器，检测目标窗口外的点击"""
 
     def __init__(self) -> None:
         self._callback: Callable[[], None] | None = None
         self._enabled = False
+        self._paused = False  # 暂停检测（避免死循环）
         self._hook = None
-        self._user32 = ctypes.windll.user32
+        self._target_hwnd: int = 0
+
+    def _low_level_mouse_hook(self, nCode: int, wParam: int, lParam) -> int:
+        """低级鼠标钩子回调"""
+        if self._enabled and not self._paused and nCode >= 0:
+            # wParam: WM_LBUTTONDOWN = 0x0201, WM_RBUTTONDOWN = 0x0204
+            if wParam in (0x0201, 0x0204):  # 鼠标按下
+                # 获取点击坐标
+                x = lParam.contents.value & 0xFFFF
+                y = (lParam.contents.value >> 16) & 0xFFFF
+
+                # 获取点击位置的窗口
+                clicked_hwnd = user32.WindowFromPoint(
+                    ctypes.wintypes.POINT(x, y)
+                )
+
+                # 如果点击的不是目标窗口，触发回调
+                if clicked_hwnd != self._target_hwnd:
+                    if self._callback:
+                        threading.Thread(target=self._callback, daemon=True).start()
+
+        return user32.CallNextHookEx(self._hook, nCode, wParam, lParam)
+
+    def start(self, target_hwnd: int, callback: Callable[[], None]) -> None:
+        """开始监听，target_hwnd是目标窗口句柄"""
+        self._target_hwnd = target_hwnd
+        self._callback = callback
+        self._enabled = True
+        self._paused = False
 
         # 定义钩子过程
         self._hook_proc = ctypes.CFUNCTYPE(
@@ -53,33 +102,23 @@ class MouseClickDetector:
             ctypes.POINTER(ctypes.c_ulong)
         )(self._low_level_mouse_hook)
 
-    def _low_level_mouse_hook(self, nCode: int, wParam: int, lParam) -> int:
-        """低级鼠标钩子回调"""
-        if self._enabled and nCode >= 0:
-            # wParam: WM_LBUTTONDOWN = 0x0201, WM_RBUTTONDOWN = 0x0204
-            if wParam in (0x0201, 0x0204):  # 鼠标按下
-                if self._callback:
-                    # 在新线程中调用回调，避免阻塞
-                    threading.Thread(target=self._callback, daemon=True).start()
-        return self._user32.CallNextHookEx(self._hook, nCode, wParam, lParam)
-
-    def start(self, callback: Callable[[], None]) -> None:
-        """开始监听鼠标点击"""
-        self._callback = callback
-        self._enabled = True
         # WH_MOUSE_LL = 14
-        self._hook = self._user32.SetWindowsHookExA(
-            14,  # WH_MOUSE_LL
-            self._hook_proc,
-            None,
-            0
-        )
+        self._hook = user32.SetWindowsHookExA(14, self._hook_proc, None, 0)
+
+    def pause_detection(self) -> None:
+        """暂停检测（暂停打字时调用，避免死循环）"""
+        self._paused = True
+
+    def resume_detection(self) -> None:
+        """恢复检测"""
+        self._paused = False
 
     def stop(self) -> None:
         """停止监听"""
         self._enabled = False
+        self._paused = False
         if self._hook:
-            self._user32.UnhookWindowsHookEx(self._hook)
+            user32.UnhookWindowsHookEx(self._hook)
             self._hook = None
 
 
@@ -124,7 +163,7 @@ class TypewriterEngine:
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._mouse_detector = MouseClickDetector()
-        self._on_mouse_click: Callable[[], None] | None = None
+        self._target_hwnd: int = 0
 
     def _type_char(self, char: str) -> None:
         """输入单个字符，处理中英文"""
@@ -140,10 +179,10 @@ class TypewriterEngine:
         self,
         text: str,
         speed_controller: SpeedController,
+        target_hwnd: int,
         on_progress: Callable[[int, int], None] | None = None,
         on_complete: Callable[[], None] | None = None,
-        on_mouse_click: Callable[[], None] | None = None,
-        on_ime_change: Callable[[], None] | None = None
+        on_mouse_click: Callable[[], None] | None = None
     ) -> None:
         """开始打字（启动后台线程）"""
         with self._lock:
@@ -152,11 +191,14 @@ class TypewriterEngine:
             self._pause_event.set()  # Not paused by default
             self._stop_event.clear()
             self._position = 0
+            self._target_hwnd = target_hwnd
+
+        # 强制输入法为英文
+        force_ime_english()
 
         # 设置鼠标点击回调
-        self._on_mouse_click = on_mouse_click
         if on_mouse_click:
-            self._mouse_detector.start(on_mouse_click)
+            self._mouse_detector.start(target_hwnd, on_mouse_click)
 
         def typing_loop() -> None:
             last_ime_check = time.time()
@@ -172,13 +214,11 @@ class TypewriterEngine:
                 if self._stop_event.is_set():
                     break
 
-                # 定期检查输入法（每0.5秒）
-                if time.time() - last_ime_check > 0.5:
+                # 定期检查并锁定输入法为英文（每0.3秒）
+                if time.time() - last_ime_check > 0.3:
                     last_ime_check = time.time()
                     if not is_ime_english():
-                        if on_ime_change:
-                            on_ime_change()
-                        break
+                        force_ime_english()
 
                 self._type_char(char)
                 self._position = i + 1
@@ -199,10 +239,15 @@ class TypewriterEngine:
     def pause(self) -> None:
         """暂停打字"""
         self._pause_event.clear()
+        self._mouse_detector.pause_detection()  # 暂停鼠标检测
 
     def resume(self) -> None:
         """继续打字"""
         self._pause_event.set()
+        # 延迟恢复鼠标检测，给用户时间点击目标窗口
+        threading.Timer(0.5, self._mouse_detector.resume_detection).start()
+        # 强制输入法为英文
+        force_ime_english()
 
     def stop(self) -> None:
         """停止打字"""
@@ -332,11 +377,6 @@ class GUIApp:
             messagebox.showwarning("提示", "请输入文本")
             return
 
-        # 检查输入法
-        if not is_ime_english():
-            messagebox.showwarning("提示", "请先切换到英文输入法（Shift或Ctrl+Space）")
-            return
-
         # 验证速度输入
         try:
             mode = self.speed_mode.get()
@@ -365,19 +405,22 @@ class GUIApp:
             return
 
         # 倒计时3秒
-        self.status_var.set("3秒后开始... 请切换到目标窗口")
+        self.status_var.set("3秒后开始... 请切换到目标窗口并点击输入框")
         self._countdown(3, lambda: self._start_typing(text, speed_controller))
 
     def _countdown(self, seconds: int, callback: Callable[[], None]) -> None:
         """倒计时"""
         if seconds > 0:
-            self.status_var.set(f"{seconds}秒后开始... 请切换到目标窗口")
+            self.status_var.set(f"{seconds}秒后开始... 请切换到目标窗口并点击输入框")
             self.root.after(1000, lambda: self._countdown(seconds - 1, callback))
         else:
             callback()
 
     def _start_typing(self, text: str, speed_controller: SpeedController) -> None:
         """实际开始打字"""
+        # 获取当前活动窗口作为目标窗口
+        target_hwnd = user32.GetForegroundWindow()
+
         self.status_var.set("状态: 打字中...")
         self.start_btn.config(state=tk.DISABLED)
         self.pause_btn.config(state=tk.NORMAL)
@@ -387,10 +430,10 @@ class GUIApp:
         self.engine.start_typing(
             text,
             speed_controller,
+            target_hwnd,
             on_progress=self._on_progress,
             on_complete=self._on_complete,
-            on_mouse_click=self._on_mouse_click,
-            on_ime_change=self._on_ime_change
+            on_mouse_click=self._on_mouse_click
         )
 
     def _on_progress(self, position: int, total: int) -> None:
@@ -405,13 +448,6 @@ class GUIApp:
         """鼠标点击回调 - 检测到点击就暂停"""
         def handle():
             self.status_var.set("已暂停 - 检测到鼠标点击")
-            self._auto_pause()
-        self.root.after(0, handle)
-
-    def _on_ime_change(self) -> None:
-        """输入法切换回调"""
-        def handle():
-            self.status_var.set("已暂停 - 请切换到英文输入法")
             self._auto_pause()
         self.root.after(0, handle)
 
