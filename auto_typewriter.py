@@ -24,20 +24,42 @@ INPUT_KEYBOARD = 1
 KEYEVENTF_UNICODE = 0x0004
 KEYEVENTF_KEYUP = 0x0002
 
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", ctypes.c_long),
+        ("dy", ctypes.c_long),
+        ("mouseData", ctypes.c_ulong),
+        ("dwFlags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.c_ulonglong)
+    ]
+
 class KEYBDINPUT(ctypes.Structure):
     _fields_ = [
-        ("wVk", wintypes.WORD),
-        ("wScan", wintypes.WORD),
-        ("dwFlags", wintypes.DWORD),
-        ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))
+        ("wVk", ctypes.c_ushort),
+        ("wScan", ctypes.c_ushort),
+        ("dwFlags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.c_ulonglong)
+    ]
+
+class HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", ctypes.c_ulong),
+        ("wParamL", ctypes.c_ushort),
+        ("wParamH", ctypes.c_ushort)
     ]
 
 class INPUT(ctypes.Structure):
     class _INPUT(ctypes.Union):
-        _fields_ = [("ki", KEYBDINPUT)]
+        _fields_ = [
+            ("mi", MOUSEINPUT),
+            ("ki", KEYBDINPUT),
+            ("hi", HARDWAREINPUT)
+        ]
+    _anonymous_ = ("_input",)
     _fields_ = [
-        ("type", wintypes.DWORD),
+        ("type", ctypes.c_ulong),
         ("_input", _INPUT)
     ]
 
@@ -46,24 +68,23 @@ def send_unicode_char(char: str) -> None:
     """通过SendInput发送Unicode字符（不走剪贴板）"""
     code = ord(char)
 
-    # 按下
     inputs = (INPUT * 2)()
 
     # Key down
     inputs[0].type = INPUT_KEYBOARD
-    inputs[0]._input.ki.wVk = 0
-    inputs[0]._input.ki.wScan = code
-    inputs[0]._input.ki.dwFlags = KEYEVENTF_UNICODE
-    inputs[0]._input.ki.time = 0
-    inputs[0]._input.ki.dwExtraInfo = None
+    inputs[0].ki.wVk = 0
+    inputs[0].ki.wScan = code
+    inputs[0].ki.dwFlags = KEYEVENTF_UNICODE
+    inputs[0].ki.time = 0
+    inputs[0].ki.dwExtraInfo = 0
 
     # Key up
     inputs[1].type = INPUT_KEYBOARD
-    inputs[1]._input.ki.wVk = 0
-    inputs[1]._input.ki.wScan = code
-    inputs[1]._input.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
-    inputs[1]._input.ki.time = 0
-    inputs[1]._input.ki.dwExtraInfo = None
+    inputs[1].ki.wVk = 0
+    inputs[1].ki.wScan = code
+    inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
+    inputs[1].ki.time = 0
+    inputs[1].ki.dwExtraInfo = 0
 
     user32.SendInput(2, ctypes.byref(inputs), ctypes.sizeof(INPUT))
 
