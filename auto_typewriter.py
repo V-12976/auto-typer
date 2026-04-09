@@ -129,7 +129,7 @@ class GUIApp:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("Auto Typewriter v1.0")
-        self.root.geometry("600x550")
+        self.root.geometry("650x600")
         self.root.minsize(500, 450)
         self._center_window()
 
