@@ -226,6 +226,27 @@ class GUIApp:
             messagebox.showwarning("提示", "请输入文本")
             return
 
+        # 验证速度输入
+        try:
+            mode = self.speed_mode.get()
+            if mode == 'fixed':
+                speed = float(self.fixed_speed_var.get())
+                if not 1 <= speed <= 50:
+                    messagebox.showwarning("提示", "速度范围: 1-50字/秒")
+                    return
+            else:
+                min_speed = float(self.min_speed_var.get())
+                max_speed = float(self.max_speed_var.get())
+                if not 1 <= min_speed <= 50 or not 1 <= max_speed <= 50:
+                    messagebox.showwarning("提示", "速度范围: 1-50字/秒")
+                    return
+                if min_speed > max_speed:
+                    messagebox.showwarning("提示", "最小速度不能大于最大速度")
+                    return
+        except ValueError:
+            messagebox.showwarning("提示", "请输入有效的数字")
+            return
+
         try:
             speed_controller = self._update_speed_controller()
         except ValueError as e:
