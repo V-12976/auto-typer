@@ -164,6 +164,7 @@ class TypewriterEngine:
         self._lock = threading.Lock()
         self._mouse_detector = MouseClickDetector()
         self._target_hwnd: int = 0
+        self._saved_clipboard: str = ""
 
     def _type_char(self, char: str) -> None:
         """输入单个字符，处理中英文"""
@@ -192,6 +193,12 @@ class TypewriterEngine:
             self._stop_event.clear()
             self._position = 0
             self._target_hwnd = target_hwnd
+
+        # 保存剪贴板内容
+        try:
+            self._saved_clipboard = pyperclip.paste()
+        except Exception:
+            self._saved_clipboard = ""
 
         # 强制输入法为英文
         force_ime_english()
@@ -228,6 +235,12 @@ class TypewriterEngine:
 
             # 清理鼠标钩子
             self._mouse_detector.stop()
+
+            # 恢复剪贴板内容
+            try:
+                pyperclip.copy(self._saved_clipboard)
+            except Exception:
+                pass
 
             if not self._stop_event.is_set() and on_complete:
                 on_complete()
