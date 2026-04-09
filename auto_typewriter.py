@@ -1,5 +1,6 @@
 # auto_typewriter.py
 import random
+import re
 import threading
 import time
 import tkinter as tk
@@ -171,6 +172,15 @@ class GUIApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.text_input.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        # Word count label
+        self.word_count_var = tk.StringVar(value="字符: 0 | 单词: 0 | 中文: 0")
+        word_count_label = ttk.Label(main_frame, textvariable=self.word_count_var)
+        word_count_label.pack(fill=tk.X, pady=(0, 5))
+
+        # Bind text change event for real-time counting
+        self.text_input.bind('<KeyRelease>', self._update_word_count)
+        self.text_input.bind('<ButtonRelease>', self._update_word_count)
+
         # Speed panel
         speed_frame = ttk.LabelFrame(main_frame, text="速度设置", padding="5")
         speed_frame.pack(fill=tk.X, pady=(0, 10))
@@ -308,6 +318,23 @@ class GUIApp:
     def _on_clear(self) -> None:
         """清空按钮处理"""
         self.text_input.delete('1.0', tk.END)
+
+    def _update_word_count(self, event=None) -> None:
+        """更新词数统计"""
+        text = self.text_input.get('1.0', tk.END).strip()
+
+        # 字符数（含标点和空格）
+        char_count = len(text)
+
+        # 单词数（英文单词）
+        words = re.findall(r'[a-zA-Z]+', text)
+        word_count = len(words)
+
+        # 中文字数（仅汉字）
+        chinese_chars = re.findall(r'[\u4e00-\u9fff]', text)
+        chinese_count = len(chinese_chars)
+
+        self.word_count_var.set(f"字符: {char_count} | 单词: {word_count} | 中文: {chinese_count}")
 
     def _reset_state(self) -> None:
         """重置界面状态"""
