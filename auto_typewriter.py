@@ -132,6 +132,9 @@ class GUIApp:
         self.root.geometry("500x400")
         self._center_window()
 
+        # 初始化引擎
+        self.engine = TypewriterEngine()
+
         self._create_widgets()
 
     def _center_window(self) -> None:
@@ -217,20 +220,80 @@ class GUIApp:
         status_bar.pack(fill=tk.X, side=tk.BOTTOM)
 
     def _on_start(self) -> None:
-        """开始按钮处理（占位方法，Task 5实现）"""
-        pass
+        """开始按钮处理"""
+        text = self.text_input.get('1.0', tk.END).strip()
+        if not text:
+            messagebox.showwarning("提示", "请输入文本")
+            return
+
+        try:
+            speed_controller = self._update_speed_controller()
+        except ValueError as e:
+            messagebox.showwarning("提示", str(e))
+            return
+
+        # 倒计时3秒
+        self.status_var.set("3秒后开始... 请切换到目标窗口")
+        self._countdown(3, lambda: self._start_typing(text, speed_controller))
+
+    def _countdown(self, seconds: int, callback: Callable[[], None]) -> None:
+        """倒计时"""
+        if seconds > 0:
+            self.status_var.set(f"{seconds}秒后开始... 请切换到目标窗口")
+            self.root.after(1000, lambda: self._countdown(seconds - 1, callback))
+        else:
+            callback()
+
+    def _start_typing(self, text: str, speed_controller: SpeedController) -> None:
+        """实际开始打字"""
+        self.status_var.set("状态: 打字中...")
+        self.start_btn.config(state=tk.DISABLED)
+        self.pause_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.NORMAL)
+        self.clear_btn.config(state=tk.DISABLED)
+
+        self.engine.start_typing(
+            text,
+            speed_controller,
+            on_progress=self._on_progress,
+            on_complete=self._on_complete
+        )
+
+    def _on_progress(self, position: int, total: int) -> None:
+        """进度更新回调"""
+        self.root.after(0, lambda: self.status_var.set(f"状态: 打字中 ({position}/{total})"))
+
+    def _on_complete(self) -> None:
+        """完成回调"""
+        self.root.after(0, self._reset_state)
 
     def _on_pause(self) -> None:
-        """暂停按钮处理（占位方法，Task 5实现）"""
-        pass
+        """暂停按钮处理"""
+        if self.engine.is_paused():
+            self.engine.resume()
+            self.pause_btn.config(text="暂停")
+            self.status_var.set("状态: 打字中...")
+        else:
+            self.engine.pause()
+            self.pause_btn.config(text="继续")
+            self.status_var.set("状态: 已暂停")
 
     def _on_stop(self) -> None:
-        """停止按钮处理（占位方法，Task 5实现）"""
-        pass
+        """停止按钮处理"""
+        self.engine.stop()
+        self._reset_state()
 
     def _on_clear(self) -> None:
-        """清空按钮处理（占位方法，Task 5实现）"""
-        pass
+        """清空按钮处理"""
+        self.text_input.delete('1.0', tk.END)
+
+    def _reset_state(self) -> None:
+        """重置界面状态"""
+        self.status_var.set("状态: 完成")
+        self.start_btn.config(state=tk.NORMAL)
+        self.pause_btn.config(state=tk.DISABLED, text="暂停")
+        self.stop_btn.config(state=tk.DISABLED)
+        self.clear_btn.config(state=tk.NORMAL)
 
     def _update_speed_controller(self) -> SpeedController:
         """根据当前设置创建速度控制器"""
