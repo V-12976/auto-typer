@@ -4,6 +4,7 @@ import threading
 import time
 import tkinter as tk
 from tkinter import ttk, messagebox
+from typing import Callable
 
 import pyautogui
 import pyperclip
@@ -37,3 +38,77 @@ class SpeedController:
             return 1.0 / speed
         else:
             raise ValueError(f"Invalid mode: {self.mode}")
+
+
+class TypewriterEngine:
+    """打字引擎，负责模拟键盘输入"""
+
+    def __init__(self) -> None:
+        self._paused: bool = False
+        self._stopped: bool = False
+        self._position: int = 0
+        self._thread: threading.Thread | None = None
+
+    def _type_char(self, char: str) -> None:
+        """输入单个字符，处理中英文"""
+        if char.isascii():
+            pyautogui.write(char)
+        else:
+            # 中文和Unicode字符通过剪贴板输入
+            pyperclip.copy(char)
+            pyautogui.hotkey('ctrl', 'v')
+            time.sleep(0.05)  # 等待粘贴完成
+
+    def start_typing(
+        self,
+        text: str,
+        speed_controller: SpeedController,
+        on_progress: Callable[[int, int], None] | None = None,
+        on_complete: Callable[[], None] | None = None
+    ) -> None:
+        """开始打字（启动后台线程）"""
+        self._paused = False
+        self._stopped = False
+        self._position = 0
+
+        def typing_loop() -> None:
+            for i, char in enumerate(text):
+                if self._stopped:
+                    break
+                while self._paused:
+                    time.sleep(0.1)
+                    if self._stopped:
+                        break
+
+                self._type_char(char)
+                self._position = i + 1
+                if on_progress:
+                    on_progress(self._position, len(text))
+                time.sleep(speed_controller.get_interval())
+
+            if not self._stopped and on_complete:
+                on_complete()
+
+        self._thread = threading.Thread(target=typing_loop, daemon=True)
+        self._thread.start()
+
+    def pause(self) -> None:
+        """暂停打字"""
+        self._paused = True
+
+    def resume(self) -> None:
+        """继续打字"""
+        self._paused = False
+
+    def stop(self) -> None:
+        """停止打字"""
+        self._stopped = True
+        self._paused = False
+
+    def is_running(self) -> bool:
+        """检查是否正在运行"""
+        return self._thread is not None and self._thread.is_alive()
+
+    def is_paused(self) -> bool:
+        """检查是否暂停"""
+        return self._paused
