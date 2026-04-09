@@ -11,7 +11,6 @@ from tkinter import ttk, messagebox
 from typing import Callable
 
 import pyautogui
-import pyperclip
 
 # Windows API
 user32 = ctypes.windll.user32
@@ -19,6 +18,54 @@ imm32 = ctypes.windll.imm32
 
 # IME 常量
 IME_CMODE_NATIVE = 0x0001
+
+# SendInput 相关结构和常量
+INPUT_KEYBOARD = 1
+KEYEVENTF_UNICODE = 0x0004
+KEYEVENTF_KEYUP = 0x0002
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))
+    ]
+
+class INPUT(ctypes.Structure):
+    class _INPUT(ctypes.Union):
+        _fields_ = [("ki", KEYBDINPUT)]
+    _fields_ = [
+        ("type", wintypes.DWORD),
+        ("_input", _INPUT)
+    ]
+
+
+def send_unicode_char(char: str) -> None:
+    """通过SendInput发送Unicode字符（不走剪贴板）"""
+    code = ord(char)
+
+    # 按下
+    inputs = (INPUT * 2)()
+
+    # Key down
+    inputs[0].type = INPUT_KEYBOARD
+    inputs[0]._input.ki.wVk = 0
+    inputs[0]._input.ki.wScan = code
+    inputs[0]._input.ki.dwFlags = KEYEVENTF_UNICODE
+    inputs[0]._input.ki.time = 0
+    inputs[0]._input.ki.dwExtraInfo = None
+
+    # Key up
+    inputs[1].type = INPUT_KEYBOARD
+    inputs[1]._input.ki.wVk = 0
+    inputs[1]._input.ki.wScan = code
+    inputs[1]._input.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
+    inputs[1]._input.ki.time = 0
+    inputs[1]._input.ki.dwExtraInfo = None
+
+    user32.SendInput(2, ctypes.byref(inputs), ctypes.sizeof(INPUT))
 
 
 def get_ime_mode() -> int:
@@ -164,17 +211,10 @@ class TypewriterEngine:
         self._lock = threading.Lock()
         self._mouse_detector = MouseClickDetector()
         self._target_hwnd: int = 0
-        self._saved_clipboard: str = ""
 
     def _type_char(self, char: str) -> None:
-        """输入单个字符，处理中英文"""
-        if char.isascii():
-            pyautogui.write(char)
-        else:
-            # 中文和Unicode字符通过剪贴板输入
-            pyperclip.copy(char)
-            pyautogui.hotkey('ctrl', 'v')
-            time.sleep(0.05)  # 等待粘贴完成
+        """输入单个字符，使用SendInput发送Unicode字符"""
+        send_unicode_char(char)
 
     def start_typing(
         self,
@@ -193,12 +233,6 @@ class TypewriterEngine:
             self._stop_event.clear()
             self._position = 0
             self._target_hwnd = target_hwnd
-
-        # 保存剪贴板内容
-        try:
-            self._saved_clipboard = pyperclip.paste()
-        except Exception:
-            self._saved_clipboard = ""
 
         # 强制输入法为英文
         force_ime_english()
@@ -235,12 +269,6 @@ class TypewriterEngine:
 
             # 清理鼠标钩子
             self._mouse_detector.stop()
-
-            # 恢复剪贴板内容
-            try:
-                pyperclip.copy(self._saved_clipboard)
-            except Exception:
-                pass
 
             if not self._stop_event.is_set() and on_complete:
                 on_complete()
