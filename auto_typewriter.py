@@ -129,7 +129,8 @@ class GUIApp:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("Auto Typewriter v1.0")
-        self.root.geometry("500x400")
+        self.root.geometry("500x450")
+        self.root.minsize(400, 350)
         self._center_window()
 
         # 初始化引擎
@@ -158,7 +159,7 @@ class GUIApp:
         text_frame = ttk.LabelFrame(main_frame, text="输入文本", padding="5")
         text_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        self.text_input = tk.Text(text_frame, wrap=tk.WORD)
+        self.text_input = tk.Text(text_frame, wrap=tk.WORD, height=8)
         scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.text_input.yview)
         self.text_input.configure(yscrollcommand=scrollbar.set)
 
